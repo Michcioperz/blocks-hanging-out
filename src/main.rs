@@ -13,6 +13,7 @@ fn set_backend(ctxb: ggez::ContextBuilder) -> ggez::ContextBuilder {
 fn main() -> GameResult<()> {
     use ggez::conf::*;
     better_panic::install();
+    pretty_env_logger::init();
     let (mut ctx, mut evl) = set_backend(
         ggez::ContextBuilder::new("blocks_hanging_out", "michcioperz")
             .window_setup(WindowSetup {
