@@ -763,6 +763,7 @@ struct Game {
     ghost: Piece,
     next: Piece,
     show_grid: bool,
+    mouse_enabled: bool,
     board_mesh: CachedMesh,
     current_mesh: CachedMesh,
     ghost_mesh: CachedMesh,
@@ -794,6 +795,7 @@ impl Game {
             ghost: current.ghost(&current.center),
             next: Piece::sample(&mut rng, &palette.pieces),
             show_grid: false,
+            mouse_enabled: true,
             rng,
             palette,
             board_mesh: CachedMesh::empty(ctx)?,
@@ -1102,6 +1104,9 @@ impl ggez::event::EventHandler for Game {
     }
 
     fn mouse_wheel_event(&mut self, _ctx: &mut Context, _x: f32, y: f32) {
+        if !self.mouse_enabled {
+            return;
+        }
         let y = -y;
         if y >= 1f32 {
             self.target_rotate((y.trunc() as usize).into());
@@ -1123,12 +1128,25 @@ impl ggez::event::EventHandler for Game {
                 KeyCode::G => {
                     self.show_grid = !self.show_grid;
                 }
+                KeyCode::M => {
+                    self.mouse_enabled = !self.mouse_enabled;
+                }
+                KeyCode::Up | KeyCode::W => self.target_move(Offset { x: 0, y: -1 }),
+                KeyCode::Down | KeyCode::S => self.target_move(Offset { x: 0, y: 1 }),
+                KeyCode::Left | KeyCode::A => self.target_move(Offset { x: -1, y: 0 }),
+                KeyCode::Right | KeyCode::D => self.target_move(Offset { x: 1, y: 0 }),
+                KeyCode::LBracket | KeyCode::Q => self.target_rotate(Rotation::NinetyCounterclockwise),
+                KeyCode::RBracket | KeyCode::E => self.target_rotate(Rotation::NinetyClockwise),
+                KeyCode::Space | KeyCode::Return => self.try_place(),
                 _ => {}
             }
         }
     }
 
     fn mouse_motion_event(&mut self, ctx: &mut Context, x: f32, y: f32, _dx: f32, _dy: f32) {
+        if !self.mouse_enabled {
+            return;
+        }
         let ScreenUtils {
             w: _,
             h: _,
@@ -1149,6 +1167,9 @@ impl ggez::event::EventHandler for Game {
         _x: f32,
         _y: f32,
     ) {
+        if !self.mouse_enabled {
+            return;
+        }
         match button {
             ggez::input::mouse::MouseButton::Left => {
                 self.try_place();
