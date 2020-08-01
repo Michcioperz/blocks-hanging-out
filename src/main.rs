@@ -1116,9 +1116,32 @@ impl ggez::event::EventHandler for Game {
         }
     }
 
-    fn key_up_event(
+    fn key_down_event(
         &mut self,
         _ctx: &mut Context,
+        keycode: ggez::input::keyboard::KeyCode,
+        keymods: ggez::input::keyboard::KeyMods,
+        _repeat: bool,
+    ) {
+        use ggez::input::keyboard::KeyCode;
+        if keymods.is_empty() {
+            match keycode {
+                KeyCode::Up | KeyCode::W => self.target_move(Offset { x: 0, y: -1 }),
+                KeyCode::Down | KeyCode::S => self.target_move(Offset { x: 0, y: 1 }),
+                KeyCode::Left | KeyCode::A => self.target_move(Offset { x: -1, y: 0 }),
+                KeyCode::Right | KeyCode::D => self.target_move(Offset { x: 1, y: 0 }),
+                KeyCode::LBracket | KeyCode::Q => {
+                    self.target_rotate(Rotation::NinetyCounterclockwise)
+                }
+                KeyCode::RBracket | KeyCode::E => self.target_rotate(Rotation::NinetyClockwise),
+                _ => (),
+            }
+        }
+    }
+
+    fn key_up_event(
+        &mut self,
+        ctx: &mut Context,
         keycode: ggez::input::keyboard::KeyCode,
         keymods: ggez::input::keyboard::KeyMods,
     ) {
@@ -1131,13 +1154,8 @@ impl ggez::event::EventHandler for Game {
                 KeyCode::M => {
                     self.mouse_enabled = !self.mouse_enabled;
                 }
-                KeyCode::Up | KeyCode::W => self.target_move(Offset { x: 0, y: -1 }),
-                KeyCode::Down | KeyCode::S => self.target_move(Offset { x: 0, y: 1 }),
-                KeyCode::Left | KeyCode::A => self.target_move(Offset { x: -1, y: 0 }),
-                KeyCode::Right | KeyCode::D => self.target_move(Offset { x: 1, y: 0 }),
-                KeyCode::LBracket | KeyCode::Q => self.target_rotate(Rotation::NinetyCounterclockwise),
-                KeyCode::RBracket | KeyCode::E => self.target_rotate(Rotation::NinetyClockwise),
                 KeyCode::Space | KeyCode::Return => self.try_place(),
+                KeyCode::Escape => ggez::event::quit(ctx),
                 _ => {}
             }
         }
