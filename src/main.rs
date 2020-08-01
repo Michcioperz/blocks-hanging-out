@@ -729,6 +729,150 @@ impl Pathfinder {
         }
     }
 
+    fn top_line(board: &Board) -> usize {
+        board
+            .rows
+            .iter()
+            .enumerate()
+            .filter_map(|(i, row)| {
+                if row.iter().any(|cell| cell.is_some()) {
+                    Some(i)
+                } else {
+                    None
+                }
+            })
+            .min()
+            .unwrap_or(Board::HEIGHT)
+    }
+
+    fn count_board_holes(board: &Board, top: usize) -> usize {
+        board
+            .rows
+            .iter()
+            .enumerate()
+            .skip(top)
+            .map(|(i, row)| row.iter().filter(|f| f.is_none()).count() * (Board::HEIGHT - i))
+            .sum::<usize>()
+    }
+
+    fn count_filled_holes(piece: &Piece, top: usize) -> usize {
+        piece
+            .fields()
+            .iter()
+            .filter(|(pos, _)| pos.y as usize >= top)
+            .map(|(pos, _)| pos.y as usize)
+            .sum::<usize>()
+    }
+
+    fn count_initiated_lines(piece: &Piece, top: usize) -> usize {
+        top.saturating_sub(
+            piece
+                .fields()
+                .iter()
+                .filter(|(pos, _)| (pos.y as usize) < top)
+                .map(|(pos, _)| Board::HEIGHT - pos.y as usize)
+                .min()
+                .unwrap_or(top),
+        )
+    }
+
+    fn count_completed_lines(board: &Board, piece: &Piece, top: usize) -> usize {
+        let ff = piece.fields();
+        let ff: Vec<&Position> = ff.iter().map(|(pos, _)| pos).collect();
+        board
+            .rows
+            .iter()
+            .enumerate()
+            .skip(top)
+            .map(|(y, row)| {
+                row.iter()
+                    .enumerate()
+                    .filter(|(x, f)| {
+                        f.is_none()
+                            || ff
+                                .iter()
+                                .any(|pos| pos.y as usize == y && pos.x as usize == *x)
+                    })
+                    .count()
+            })
+            .filter(|c| *c == 0)
+            .count()
+    }
+
+    const INITIATED_LINE_PENALTY: usize = 15;
+    const BOARD_HOLE_PENALTY: usize = 1;
+    const FILLED_HOLE_REWARD: usize = 8;
+    const COMPLETED_LINE_REWARD: usize = 15;
+
+    fn loss_debug(board: &Board, piece: &Piece) {
+        let top = Pathfinder::top_line(board);
+        let lines = Board::HEIGHT - top;
+        let board_holes =
+            Pathfinder::count_board_holes(board, top) * Pathfinder::BOARD_HOLE_PENALTY;
+        let initiated_lines =
+            Pathfinder::count_initiated_lines(piece, top) * Pathfinder::INITIATED_LINE_PENALTY;
+        let filled_holes =
+            Pathfinder::count_filled_holes(piece, top) * Pathfinder::FILLED_HOLE_REWARD;
+        let completed_lines = Pathfinder::count_completed_lines(board, piece, top)
+            * Pathfinder::COMPLETED_LINE_REWARD;
+        dbg!(lines);
+        dbg!(board_holes);
+        dbg!(initiated_lines);
+        dbg!(filled_holes);
+        dbg!(completed_lines);
+    }
+
+    fn loss(board: &Board, piece: &Piece) -> isize {
+        let top = Pathfinder::top_line(board);
+        let lines = Board::HEIGHT - top;
+
+        lines as isize
+            + (Pathfinder::count_board_holes(board, top) * Pathfinder::BOARD_HOLE_PENALTY) as isize
+            + (Pathfinder::count_initiated_lines(piece, top) * Pathfinder::INITIATED_LINE_PENALTY)
+                as isize
+            - (Pathfinder::count_filled_holes(piece, top) * Pathfinder::FILLED_HOLE_REWARD) as isize
+            - (Pathfinder::count_completed_lines(board, piece, top)
+                * Pathfinder::COMPLETED_LINE_REWARD) as isize
+    }
+
+    fn choose(board: &Board, start: &Piece, cumulative_loss: &mut isize) -> Piece {
+        let mut pf = Pathfinder::default();
+        let mut q = std::collections::VecDeque::new();
+        let mut bestsol = *start;
+        let mut bestloss = isize::MAX;
+        q.push_back(*start);
+        while let Some(piece) = q.pop_front() {
+            if board.supports(&piece) {
+                let new_loss = *cumulative_loss + Pathfinder::loss(board, &piece);
+                if new_loss < bestloss {
+                    bestloss = new_loss;
+                    bestsol = piece;
+                }
+            }
+            if pf.subsol[piece.center.y as usize][piece.center.x as usize]
+                [usize::from(&piece.rotation)]
+            .is_none()
+            {
+                q.extend(
+                    Pathfinder::neighbour_moves(&piece)
+                        .map(|(_, target)| target)
+                        .filter(|target| board.can_insert(target))
+                        .filter(|target| {
+                            pf.subsol[target.center.y as usize][target.center.x as usize]
+                                [usize::from(&target.rotation)]
+                            .is_none()
+                        }),
+                );
+                pf.subsol[piece.center.y as usize][piece.center.x as usize]
+                    [usize::from(&piece.rotation)] = Some(Default::default());
+            }
+        }
+        Pathfinder::loss_debug(board, &bestsol);
+        dbg!(bestloss);
+        *cumulative_loss = bestloss;
+        bestsol
+    }
+
     fn solve(board: &Board, start: &Piece, end: &Piece) -> Solution {
         let mut pf = Pathfinder::default();
         let mut q = std::collections::VecDeque::new();
@@ -778,6 +922,8 @@ struct Game {
     next: Piece,
     show_grid: bool,
     mouse_enabled: bool,
+    auto_mode: bool,
+    auto_penalty: isize,
     board_mesh: CachedMesh,
     current_mesh: CachedMesh,
     ghost_mesh: CachedMesh,
@@ -810,6 +956,8 @@ impl Game {
             next: Piece::sample(&mut rng, &palette.pieces),
             show_grid: false,
             mouse_enabled: true,
+            auto_mode: false,
+            auto_penalty: -50,
             rng,
             palette,
             board_mesh: CachedMesh::empty(ctx)?,
@@ -822,6 +970,12 @@ impl Game {
         })
     }
 
+    fn prepare_auto(&mut self) {
+        let new_target = Pathfinder::choose(&self.board, &self.current, &mut self.auto_penalty);
+        self.target_move_to(new_target.center);
+        self.target_set_rotation(new_target.rotation);
+    }
+
     fn target_invalidate(&mut self) {
         self.ghost_mesh.valid = false;
         self.scheduled_steps_valid = false;
@@ -829,6 +983,11 @@ impl Game {
 
     fn target_rotate(&mut self, diff: Rotation) {
         self.ghost.rotation = self.ghost.rotation + diff;
+        self.target_invalidate();
+    }
+
+    fn target_set_rotation(&mut self, rot: Rotation) {
+        self.ghost.rotation = rot;
         self.target_invalidate();
     }
 
@@ -866,9 +1025,21 @@ impl Game {
         self.current_mesh.valid = false;
     }
 
-    fn try_place(&mut self) {
+    fn try_place(&mut self, ctx: &mut Context) {
         if self.board.try_insert(&self.current) {
             self.board_mesh.valid = false;
+            if !self.board.can_insert(&self.next) {
+                if self.auto_mode {
+                    *self = Game {
+                        show_grid: self.show_grid,
+                        mouse_enabled: self.mouse_enabled,
+                        auto_mode: self.auto_mode,
+                        ..Game::new(ctx).unwrap()
+                    };
+                } else {
+                    // TODO
+                }
+            }
             self.current = self.next;
             self.current_mesh.valid = false;
             self.ghost = self.current.ghost(&self.ghost.center);
@@ -876,6 +1047,9 @@ impl Game {
             self.next = Piece::sample(&mut self.rng, &self.palette.pieces);
             self.next_mesh.valid = false;
             self.board.try_clear();
+            if self.auto_mode {
+                self.prepare_auto();
+            }
         }
     }
 
@@ -1117,7 +1291,7 @@ impl ggez::event::EventHandler for Game {
     }
 
     fn mouse_wheel_event(&mut self, _ctx: &mut Context, _x: f32, y: f32) {
-        if !self.mouse_enabled {
+        if self.auto_mode || !self.mouse_enabled {
             return;
         }
         let y = -y;
@@ -1137,6 +1311,9 @@ impl ggez::event::EventHandler for Game {
         _repeat: bool,
     ) {
         use ggez::input::keyboard::KeyCode;
+        if self.auto_mode {
+            return;
+        }
         if keymods.is_empty() {
             match keycode {
                 KeyCode::Up | KeyCode::W => self.target_move(Offset { x: 0, y: -1 }),
@@ -1167,7 +1344,13 @@ impl ggez::event::EventHandler for Game {
                 KeyCode::M => {
                     self.mouse_enabled = !self.mouse_enabled;
                 }
-                KeyCode::Space | KeyCode::Return => self.try_place(),
+                KeyCode::O => {
+                    self.auto_mode = !self.auto_mode;
+                    if self.auto_mode {
+                        self.prepare_auto();
+                    }
+                }
+                KeyCode::Space | KeyCode::Return if !self.auto_mode => self.try_place(ctx),
                 KeyCode::Escape => ggez::event::quit(ctx),
                 _ => {}
             }
@@ -1175,7 +1358,7 @@ impl ggez::event::EventHandler for Game {
     }
 
     fn mouse_motion_event(&mut self, ctx: &mut Context, x: f32, y: f32, _dx: f32, _dy: f32) {
-        if !self.mouse_enabled {
+        if self.auto_mode || !self.mouse_enabled {
             return;
         }
         let ScreenUtils {
@@ -1195,17 +1378,17 @@ impl ggez::event::EventHandler for Game {
 
     fn mouse_button_up_event(
         &mut self,
-        _ctx: &mut Context,
+        ctx: &mut Context,
         button: ggez::input::mouse::MouseButton,
         _x: f32,
         _y: f32,
     ) {
-        if !self.mouse_enabled {
+        if self.auto_mode || !self.mouse_enabled {
             return;
         }
         match button {
             ggez::input::mouse::MouseButton::Left => {
-                self.try_place();
+                self.try_place(ctx);
             }
             ggez::input::mouse::MouseButton::Right => {
                 self.ghost.rotation = self.ghost.rotation + 1.into();
@@ -1215,7 +1398,7 @@ impl ggez::event::EventHandler for Game {
         }
     }
 
-    fn update(&mut self, _ctx: &mut Context) -> GameResult<()> {
+    fn update(&mut self, ctx: &mut Context) -> GameResult<()> {
         use either::Either::*;
         if !self.scheduled_steps_valid {
             self.scheduled_steps = Pathfinder::solve(&self.board, &self.current, &self.ghost);
@@ -1225,6 +1408,9 @@ impl ggez::event::EventHandler for Game {
             Some(Left(off)) => self.exec_move(off),
             Some(Right(rot)) => self.exec_rotate(rot),
             None => (),
+        }
+        if self.auto_mode && self.scheduled_steps.is_empty() {
+            self.try_place(ctx);
         }
         Ok(())
     }
