@@ -1,32 +1,20 @@
 use ggez::{graphics::Color, nalgebra as na, Context, GameResult};
 
-#[cfg(feature = "gles")]
-fn set_backend(ctxb: ggez::ContextBuilder) -> ggez::ContextBuilder {
-    ctxb.backend(ggez::conf::Backend::OpenGLES { major: 2, minor: 0 })
-}
-
-#[cfg(not(feature = "gles"))]
-fn set_backend(ctxb: ggez::ContextBuilder) -> ggez::ContextBuilder {
-    ctxb
-}
-
 fn main() -> GameResult<()> {
     use ggez::conf::*;
     better_panic::install();
     pretty_env_logger::init();
-    let (mut ctx, mut evl) = set_backend(
-        ggez::ContextBuilder::new("blocks_hanging_out", "michcioperz")
-            .window_setup(WindowSetup {
-                title: "blocks hanging out".to_owned(),
-                ..WindowSetup::default()
-            })
-            .window_mode(WindowMode {
-                resizable: true,
-                ..WindowMode::default()
-            }),
-    )
-    .build()
-    .unwrap();
+    let (mut ctx, mut evl) = ggez::ContextBuilder::new("blocks_hanging_out", "michcioperz")
+        .window_setup(WindowSetup {
+            title: "blocks hanging out".to_owned(),
+            ..WindowSetup::default()
+        })
+        .window_mode(WindowMode {
+            resizable: true,
+            ..WindowMode::default()
+        })
+        .build()
+        .unwrap();
     let mut game = Game::new(&mut ctx)?;
     ggez::event::run(&mut ctx, &mut evl, &mut game)
 }
