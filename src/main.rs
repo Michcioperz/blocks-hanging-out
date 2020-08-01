@@ -992,15 +992,14 @@ impl ggez::event::EventHandler for Game {
                 w: tile_size * 5f32,
                 h: tile_size * 5f32,
             };
-            mesh = mesh.rectangle(
-                graphics::DrawMode::fill(),
-                next_rect,
-                self.palette.board,
-            ).rectangle(
-                graphics::DrawMode::stroke(tile_size / 10.0),
-                next_rect,
-                self.palette.board.darken(),
-            ).clone();
+            mesh = mesh
+                .rectangle(graphics::DrawMode::fill(), next_rect, self.palette.board)
+                .rectangle(
+                    graphics::DrawMode::stroke(tile_size / 10.0),
+                    next_rect,
+                    self.palette.board.darken(),
+                )
+                .clone();
             self.next_mesh = CachedMesh {
                 valid: true,
                 mesh: self
