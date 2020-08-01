@@ -311,6 +311,19 @@ impl std::ops::Add<Offset> for Position {
     }
 }
 
+impl Position {
+    fn saturating_add(self, other: Offset) -> Position {
+        Position {
+            x: (self.x as isize + other.x)
+                .min(Board::WIDTH as isize - 1)
+                .max(0) as usize,
+            y: (self.y as isize + other.y)
+                .min(Board::HEIGHT as isize - 1)
+                .max(0) as usize,
+        }
+    }
+}
+
 #[derive(Copy, Clone, Debug)]
 enum PieceShape {
     I,
@@ -756,6 +769,7 @@ struct Game {
     next_mesh: CachedMesh,
     grid_mesh: CachedMesh,
     scheduled_steps: Solution,
+    scheduled_steps_valid: bool,
 }
 
 struct ScreenUtils {
@@ -788,33 +802,52 @@ impl Game {
             grid_mesh: CachedMesh::empty(ctx)?,
             next_mesh: CachedMesh::empty(ctx)?,
             scheduled_steps: Solution::new(),
+            scheduled_steps_valid: true,
         })
     }
 
-    fn try_rotate(&mut self, diff: Rotation) -> bool {
+    fn target_invalidate(&mut self) {
+        self.ghost_mesh.valid = false;
+        self.scheduled_steps_valid = false;
+    }
+
+    fn target_rotate(&mut self, diff: Rotation) {
+        self.ghost.rotation = self.ghost.rotation + diff;
+        self.target_invalidate();
+    }
+
+    fn target_move_to(&mut self, pos: Position) {
+        self.ghost.center = pos;
+        self.target_invalidate();
+    }
+
+    fn target_move(&mut self, off: Offset) {
+        self.ghost.center = self.ghost.center.saturating_add(off);
+        self.target_invalidate();
+    }
+
+    fn exec_rotate(&mut self, diff: Rotation) {
         if diff == Rotation::UpsideDown {
-            return false;
+            panic!("attempt to perform queued rotation by more than one");
         }
         let new_piece = self.current * diff;
         if !self.board.can_insert(&new_piece) {
-            return false;
+            panic!("attempt to perform queued rotation to invalid target");
         }
         self.current = new_piece;
         self.current_mesh.valid = false;
-        true
     }
 
-    fn try_move(&mut self, diff: Offset) -> bool {
+    fn exec_move(&mut self, diff: Offset) {
         if diff.x.abs() + diff.y.abs() > 1 {
-            return false;
+            panic!("attempt to perform queued move by more than one");
         }
         let new_piece = self.current + diff;
         if !self.board.can_insert(&new_piece) {
-            return false;
+            panic!("attempt to perform queued move to invalid target");
         }
         self.current = new_piece;
         self.current_mesh.valid = false;
-        true
     }
 
     fn try_place(&mut self) {
@@ -823,11 +856,10 @@ impl Game {
             self.current = self.next;
             self.current_mesh.valid = false;
             self.ghost = self.current.ghost(&self.ghost.center);
-            self.ghost_mesh.valid = false;
+            self.target_invalidate();
             self.next = Piece::sample(&mut self.rng, &self.palette.pieces);
             self.next_mesh.valid = false;
             self.board.try_clear();
-            self.scheduled_steps = Pathfinder::solve(&self.board, &self.current, &self.ghost);
         }
     }
 
@@ -1070,21 +1102,12 @@ impl ggez::event::EventHandler for Game {
     }
 
     fn mouse_wheel_event(&mut self, _ctx: &mut Context, _x: f32, y: f32) {
-        let mut y = y;
-        let mut changed = false;
-        while y >= 1f32 {
-            self.ghost.rotation = self.ghost.rotation + 1.into();
-            changed = true;
-            y -= 1f32;
+        let y = -y;
+        if y >= 1f32 {
+            self.target_rotate((y.trunc() as usize).into());
         }
-        while y <= 1f32 {
-            self.ghost.rotation = self.ghost.rotation - 1.into();
-            changed = true;
-            y += 1f32;
-        }
-        if changed {
-            self.ghost_mesh.valid = false;
-            self.scheduled_steps = Pathfinder::solve(&self.board, &self.current, &self.ghost);
+        if y <= 1f32 {
+            self.target_rotate(-Rotation::from(-y.trunc() as usize));
         }
     }
 
@@ -1095,8 +1118,13 @@ impl ggez::event::EventHandler for Game {
         keymods: ggez::input::keyboard::KeyMods,
     ) {
         use ggez::input::keyboard::KeyCode;
-        if keymods.is_empty() && keycode == KeyCode::G {
-            self.show_grid = !self.show_grid;
+        if keymods.is_empty() {
+            match keycode {
+                KeyCode::G => {
+                    self.show_grid = !self.show_grid;
+                }
+                _ => {}
+            }
         }
     }
 
@@ -1111,9 +1139,7 @@ impl ggez::event::EventHandler for Game {
             .min(Board::WIDTH - 1);
         let y = ((((y - screen_offset.y as f32) / tile_size) as isize).max(0) as usize)
             .min(Board::HEIGHT - 1);
-        self.ghost.center = Position { x, y };
-        self.ghost_mesh.valid = false;
-        self.scheduled_steps = Pathfinder::solve(&self.board, &self.current, &self.ghost);
+        self.target_move_to(Position { x, y });
     }
 
     fn mouse_button_up_event(
@@ -1130,7 +1156,6 @@ impl ggez::event::EventHandler for Game {
             ggez::input::mouse::MouseButton::Right => {
                 self.ghost.rotation = self.ghost.rotation + 1.into();
                 self.ghost_mesh.valid = false;
-                self.scheduled_steps = Pathfinder::solve(&self.board, &self.current, &self.ghost);
             }
             _ => {}
         }
@@ -1138,13 +1163,14 @@ impl ggez::event::EventHandler for Game {
 
     fn update(&mut self, _ctx: &mut Context) -> GameResult<()> {
         use either::Either::*;
-        let step_success = match self.scheduled_steps.pop_front() {
-            Some(Left(off)) => self.try_move(off),
-            Some(Right(rot)) => self.try_rotate(rot),
-            None => true,
-        };
-        if !step_success {
-            self.scheduled_steps.clear();
+        if !self.scheduled_steps_valid {
+            self.scheduled_steps = Pathfinder::solve(&self.board, &self.current, &self.ghost);
+            self.scheduled_steps_valid = true;
+        }
+        match self.scheduled_steps.pop_front() {
+            Some(Left(off)) => self.exec_move(off),
+            Some(Right(rot)) => self.exec_rotate(rot),
+            None => (),
         }
         Ok(())
     }
