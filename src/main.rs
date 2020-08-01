@@ -257,7 +257,7 @@ impl std::ops::Mul<&Rotation> for &Border {
     fn mul(self, other: &Rotation) -> Border {
         use Rotation::*;
         match other {
-            Verbatim => self.clone(),
+            Verbatim => *self,
             UpsideDown => Border {
                 top: self.bottom,
                 bottom: self.top,
