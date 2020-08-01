@@ -156,8 +156,8 @@ impl Field {
 
 #[derive(Copy, Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
 struct Position {
-    x: usize,
-    y: usize,
+    x: isize,
+    y: isize,
 }
 
 #[derive(Copy, Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
@@ -176,7 +176,8 @@ enum Rotation {
 
 impl Position {
     fn distance(&self, other: &Position) -> usize {
-        self.x.max(other.x) - self.x.min(other.x) + self.y.max(other.y) - self.y.min(other.y)
+        (self.x.max(other.x) - self.x.min(other.x) + self.y.max(other.y) - self.y.min(other.y))
+            as usize
     }
 }
 
@@ -305,8 +306,8 @@ impl std::ops::Add<Offset> for Position {
     type Output = Position;
     fn add(self, other: Offset) -> Position {
         Position {
-            x: (self.x as isize + other.x) as usize,
-            y: (self.y as isize + other.y) as usize,
+            x: self.x + other.x,
+            y: self.y + other.y,
         }
     }
 }
@@ -314,12 +315,8 @@ impl std::ops::Add<Offset> for Position {
 impl Position {
     fn saturating_add(self, other: Offset) -> Position {
         Position {
-            x: (self.x as isize + other.x)
-                .min(Board::WIDTH as isize - 1)
-                .max(0) as usize,
-            y: (self.y as isize + other.y)
-                .min(Board::HEIGHT as isize - 1)
-                .max(0) as usize,
+            x: (self.x + other.x).min(Board::WIDTH as isize - 1).max(0),
+            y: (self.y + other.y).min(Board::HEIGHT as isize - 1).max(0),
         }
     }
 }
@@ -464,7 +461,7 @@ impl Piece {
             shape: PieceShape::from(rng.gen_range(0, PieceShape::COUNT)),
             rotation: Rotation::Verbatim,
             center: Position {
-                x: Board::WIDTH / 2,
+                x: Board::WIDTH as isize / 2,
                 y: 2,
             },
             color: palette[rng.gen_range(0, palette.len())],
@@ -556,7 +553,15 @@ impl Board {
     fn fields(&self) -> impl Iterator<Item = (Position, Field)> + '_ {
         self.rows.iter().enumerate().flat_map(|(y, row)| {
             row.iter().enumerate().filter_map(move |(x, cell)| {
-                cell.and_then(|field| Some((Position { x, y }, field)))
+                cell.and_then(|field| {
+                    Some((
+                        Position {
+                            x: x as isize,
+                            y: y as isize,
+                        },
+                        field,
+                    ))
+                })
             })
         })
     }
@@ -566,21 +571,22 @@ impl Board {
         piece
             .fields()
             .into_iter()
-            .any(|(pos, _)| self.rows[pos.y][pos.x].is_some())
+            .any(|(pos, _)| self.rows[pos.y as usize][pos.x as usize].is_some())
     }
 
     #[inline]
     fn supports(&self, piece: &Piece) -> bool {
-        piece
-            .fields()
-            .into_iter()
-            .any(|(pos, _)| pos.y + 1 >= Board::HEIGHT || self.rows[pos.y + 1][pos.x].is_some())
+        piece.fields().into_iter().any(|(pos, _)| {
+            pos.y + 1 >= Board::HEIGHT as isize
+                || self.rows[pos.y as usize + 1][pos.x as usize].is_some()
+        })
     }
 
     #[inline]
     fn has_inside(&self, piece: &Piece) -> bool {
         piece.fields().into_iter().all(|(pos, _)| {
-            (0..Board::HEIGHT).contains(&pos.y) && (0..Board::WIDTH).contains(&pos.x)
+            (0..Board::HEIGHT as isize).contains(&pos.y)
+                && (0..Board::WIDTH as isize).contains(&pos.x)
         })
     }
 
@@ -591,13 +597,13 @@ impl Board {
 
     #[inline]
     fn try_insert(&mut self, piece: &Piece) -> bool {
-        if !self.supports(piece) {
+        if !self.can_insert(piece) || !self.supports(piece) {
             return false;
         }
         piece
             .fields()
             .into_iter()
-            .for_each(|(pos, f)| self.rows[pos.y][pos.x] = Some(f));
+            .for_each(|(pos, f)| self.rows[pos.y as usize][pos.x as usize] = Some(f));
         true
     }
 
@@ -735,16 +741,24 @@ impl Pathfinder {
                 bestdistance = new_dist;
                 bestsol = path.clone();
             }
-            if pf.subsol[piece.center.y][piece.center.x][usize::from(&piece.rotation)].is_none() {
+            if pf.subsol[piece.center.y as usize][piece.center.x as usize]
+                [usize::from(&piece.rotation)]
+            .is_none()
+            {
                 for (mov, target) in Pathfinder::neighbour_moves(&piece)
                     .filter(|(_, target)| board.can_insert(target))
+                    .filter(|(_, target)| {
+                        pf.subsol[target.center.y as usize][target.center.x as usize]
+                            [usize::from(&target.rotation)]
+                        .is_none()
+                    })
                 {
                     let mut new_path = path.clone();
                     new_path.push_back(mov);
                     q.push_back((target, new_path));
                 }
-                pf.subsol[piece.center.y][piece.center.x][usize::from(&piece.rotation)] =
-                    Some(path);
+                pf.subsol[piece.center.y as usize][piece.center.x as usize]
+                    [usize::from(&piece.rotation)] = Some(path);
             }
             if bestdistance < 1 {
                 break;
@@ -1010,7 +1024,7 @@ impl ggez::event::EventHandler for Game {
                         field.mesh(
                             mb,
                             pos + Offset {
-                                x: (Board::WIDTH - self.next.center.x + 3) as isize,
+                                x: (Board::WIDTH as isize - self.next.center.x + 3) as isize,
                                 y: 0,
                             },
                             tile_size,
@@ -1170,10 +1184,12 @@ impl ggez::event::EventHandler for Game {
             tile_size,
             screen_offset,
         } = self.screen_utils(ctx);
-        let x = ((((x - screen_offset.x as f32) / tile_size) as isize).max(0) as usize)
-            .min(Board::WIDTH - 1);
-        let y = ((((y - screen_offset.y as f32) / tile_size) as isize).max(0) as usize)
-            .min(Board::HEIGHT - 1);
+        let x = (((x - screen_offset.x as f32) / tile_size) as isize)
+            .max(0)
+            .min(Board::WIDTH as isize - 1);
+        let y = (((y - screen_offset.y as f32) / tile_size) as isize)
+            .max(0)
+            .min(Board::HEIGHT as isize - 1);
         self.target_move_to(Position { x, y });
     }
 
