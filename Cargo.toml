@@ -1,0 +1,18 @@
+[package]
+name = "blocks-hanging-out"
+version = "0.1.0"
+authors = ["Michał Sidor (Michcioperz) <public+git@meekchopp.es>"]
+edition = "2018"
+
+[profile.dev]
+opt-level = "s"
+
+[features]
+gles = []
+
+[dependencies]
+ggez = { version = "0.5" }
+rand = { version = "0.7.3", default_features = false, features = ["small_rng"] }
+better-panic = "0.2.0"
+either = "1.5.3"
+palette = { version = "0.5.0", default_features = false, features = ["std"] }
