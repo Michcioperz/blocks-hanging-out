@@ -5,8 +5,7 @@ authors = ["Michał Sidor (Michcioperz) <public+git@meekchopp.es>"]
 edition = "2018"
 
 [profile.dev]
-opt-level = 2
-lto = "thin"
+opt-level = 1
 
 [profile.release]
 opt-level = 3
