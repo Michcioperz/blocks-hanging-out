@@ -1,3 +1,5 @@
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+
 use ggez::{graphics::Color, nalgebra as na, Context, GameResult};
 
 fn main() -> GameResult<()> {
