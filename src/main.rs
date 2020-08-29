@@ -668,6 +668,7 @@ use std::collections::VecDeque;
 
 type Move = either::Either<Offset, Rotation>;
 type Solution = std::collections::VecDeque<Move>;
+type DFSMap = [[bool; Board::WIDTH]; Board::HEIGHT];
 
 #[derive(Debug, Default)]
 struct Pathfinder {
@@ -747,14 +748,36 @@ impl Pathfinder {
             .unwrap_or(Board::HEIGHT)
     }
 
-    fn count_board_holes(board: &Board, top: usize) -> usize {
-        board
-            .rows
-            .iter()
-            .enumerate()
-            .skip(top)
-            .map(|(i, row)| row.iter().filter(|f| f.is_none()).count() * (Board::HEIGHT - i))
-            .sum::<usize>()
+
+    fn dfs(board: &Board, reached: &mut DFSMap, y: usize, x: usize) {
+        assert!(!reached[y][x]);
+        assert!(board.rows[y][x].is_none());
+        reached[y][x] = true;
+        if y > 0 && !reached[y - 1][x] && board.rows[y - 1][x].is_none() {
+            Self::dfs(board, reached, y - 1, x);
+        }
+        if y < Board::HEIGHT - 1 && !reached[y + 1][x] && board.rows[y + 1][x].is_none() {
+            Self::dfs(board, reached, y + 1, x);
+        }
+        if x > 0 && !reached[y][x - 1] && board.rows[y][x - 1].is_none() {
+            Self::dfs(board, reached, y, x - 1);
+        }
+        if x < Board::WIDTH - 1 && !reached[y][x + 1] && board.rows[y][x + 1].is_none() {
+            Self::dfs(board, reached, y, x + 1);
+        }
+    }
+
+    fn count_board_holes(board: &Board) -> usize {
+        let mut reached = DFSMap::default();
+        let y = 0;
+        (0..Board::WIDTH).filter(|&x| board.rows[y][x].is_none()).for_each(|x| {
+            if !reached[y][x] {
+                Self::dfs(board, &mut reached, y, x);
+            }
+        });
+        let all_empties: usize = board.rows.iter().map(|row| row.iter().filter(|cell| cell.is_none()).count()).sum();
+        let reached_empties: usize = reached.iter().map(|row| row.iter().filter(|&boo| *boo).count()).sum();
+        all_empties - reached_empties
     }
 
     fn count_filled_holes(piece: &Piece, top: usize) -> usize {
@@ -802,15 +825,15 @@ impl Pathfinder {
     }
 
     const INITIATED_LINE_PENALTY: usize = 15;
-    const BOARD_HOLE_PENALTY: usize = 1;
+    const BOARD_HOLE_PENALTY: usize = 10;
     const FILLED_HOLE_REWARD: usize = 8;
-    const COMPLETED_LINE_REWARD: usize = 15;
+    const COMPLETED_LINE_REWARD: usize = 20;
 
     fn loss_debug(board: &Board, piece: &Piece) {
         let top = Pathfinder::top_line(board);
         let lines = Board::HEIGHT - top;
         let board_holes =
-            Pathfinder::count_board_holes(board, top) * Pathfinder::BOARD_HOLE_PENALTY;
+            Pathfinder::count_board_holes(board) * Pathfinder::BOARD_HOLE_PENALTY;
         let initiated_lines =
             Pathfinder::count_initiated_lines(piece, top) * Pathfinder::INITIATED_LINE_PENALTY;
         let filled_holes =
@@ -829,7 +852,7 @@ impl Pathfinder {
         let lines = Board::HEIGHT - top;
 
         lines as isize
-            + (Pathfinder::count_board_holes(board, top) * Pathfinder::BOARD_HOLE_PENALTY) as isize
+            + (Pathfinder::count_board_holes(board) * Pathfinder::BOARD_HOLE_PENALTY) as isize
             + (Pathfinder::count_initiated_lines(piece, top) * Pathfinder::INITIATED_LINE_PENALTY)
                 as isize
             - (Pathfinder::count_filled_holes(piece, top) * Pathfinder::FILLED_HOLE_REWARD) as isize
