@@ -1,12 +1,12 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-use ggez::{graphics::Color, nalgebra as na, Context, GameResult};
+use ggez::{graphics::Color, mint, Context, GameResult};
 
 fn main() -> GameResult<()> {
     use ggez::conf::*;
     better_panic::install();
     pretty_env_logger::init();
-    let (mut ctx, mut evl) = ggez::ContextBuilder::new("blocks_hanging_out", "michcioperz")
+    let (mut ctx, evl) = ggez::ContextBuilder::new("blocks_hanging_out", "michcioperz")
         .window_setup(WindowSetup {
             title: "blocks hanging out".to_owned(),
             ..WindowSetup::default()
@@ -17,8 +17,8 @@ fn main() -> GameResult<()> {
         })
         .build()
         .unwrap();
-    let mut game = Game::new(&mut ctx)?;
-    ggez::event::run(&mut ctx, &mut evl, &mut game)
+    let game = Game::new(&mut ctx)?;
+    ggez::event::run(ctx, evl, game)
 }
 
 trait Darken {
@@ -94,7 +94,7 @@ impl Field {
         pos: Position,
         tile_size: f32,
         screen_offset: Offset,
-    ) -> &mut ggez::graphics::MeshBuilder {
+    ) -> GameResult<&mut ggez::graphics::MeshBuilder> {
         use ggez::graphics;
         let mut m = mb;
         let x = screen_offset.x as f32 + tile_size * pos.x as f32;
@@ -108,51 +108,67 @@ impl Field {
                 h: tile_size,
             },
             self.color,
-        );
+        )?;
         let border_color = self.color.darken();
         if self.border.top {
-            m = m
-                .line(
-                    &[na::Point2::new(x, y), na::Point2::new(x + tile_size, y)],
-                    tile_size / 5f32,
-                    border_color,
-                )
-                .unwrap();
+            m = m.line(
+                &[
+                    mint::Point2 { x, y },
+                    mint::Point2 {
+                        x: x + tile_size,
+                        y,
+                    },
+                ],
+                tile_size / 5f32,
+                border_color,
+            )?;
         }
         if self.border.left {
-            m = m
-                .line(
-                    &[na::Point2::new(x, y), na::Point2::new(x, y + tile_size)],
-                    tile_size / 5f32,
-                    border_color,
-                )
-                .unwrap();
+            m = m.line(
+                &[
+                    mint::Point2 { x, y },
+                    mint::Point2 {
+                        x,
+                        y: y + tile_size,
+                    },
+                ],
+                tile_size / 5f32,
+                border_color,
+            )?;
         }
         if self.border.bottom {
-            m = m
-                .line(
-                    &[
-                        na::Point2::new(x, y + tile_size),
-                        na::Point2::new(x + tile_size, y + tile_size),
-                    ],
-                    tile_size / 5f32,
-                    border_color,
-                )
-                .unwrap();
+            m = m.line(
+                &[
+                    mint::Point2 {
+                        x,
+                        y: y + tile_size,
+                    },
+                    mint::Point2 {
+                        x: x + tile_size,
+                        y: y + tile_size,
+                    },
+                ],
+                tile_size / 5f32,
+                border_color,
+            )?;
         }
         if self.border.right {
-            m = m
-                .line(
-                    &[
-                        na::Point2::new(x + tile_size, y),
-                        na::Point2::new(x + tile_size, y + tile_size),
-                    ],
-                    tile_size / 5f32,
-                    border_color,
-                )
-                .unwrap();
+            m = m.line(
+                &[
+                    mint::Point2 {
+                        x: x + tile_size,
+                        y,
+                    },
+                    mint::Point2 {
+                        x: x + tile_size,
+                        y: y + tile_size,
+                    },
+                ],
+                tile_size / 5f32,
+                border_color,
+            )?;
         }
-        m
+        Ok(m)
     }
 }
 
@@ -460,13 +476,13 @@ impl Piece {
     fn sample(rng: &mut rand::rngs::SmallRng, palette: &[Color]) -> Piece {
         use rand::Rng;
         Piece {
-            shape: PieceShape::from(rng.gen_range(0, PieceShape::COUNT)),
+            shape: PieceShape::from(rng.gen_range(0..PieceShape::COUNT)),
             rotation: Rotation::Verbatim,
             center: Position {
                 x: Board::WIDTH as isize / 2,
                 y: 2,
             },
-            color: palette[rng.gen_range(0, palette.len())],
+            color: palette[rng.gen_range(0..palette.len())],
         }
     }
 
@@ -748,7 +764,6 @@ impl Pathfinder {
             .unwrap_or(Board::HEIGHT)
     }
 
-
     fn dfs(board: &Board, reached: &mut DFSMap, y: usize, x: usize) {
         assert!(!reached[y][x]);
         assert!(board.rows[y][x].is_none());
@@ -770,13 +785,22 @@ impl Pathfinder {
     fn count_board_holes(board: &Board) -> usize {
         let mut reached = DFSMap::default();
         let y = 0;
-        (0..Board::WIDTH).filter(|&x| board.rows[y][x].is_none()).for_each(|x| {
-            if !reached[y][x] {
-                Self::dfs(board, &mut reached, y, x);
-            }
-        });
-        let all_empties: usize = board.rows.iter().map(|row| row.iter().filter(|cell| cell.is_none()).count()).sum();
-        let reached_empties: usize = reached.iter().map(|row| row.iter().filter(|&boo| *boo).count()).sum();
+        (0..Board::WIDTH)
+            .filter(|&x| board.rows[y][x].is_none())
+            .for_each(|x| {
+                if !reached[y][x] {
+                    Self::dfs(board, &mut reached, y, x);
+                }
+            });
+        let all_empties: usize = board
+            .rows
+            .iter()
+            .map(|row| row.iter().filter(|cell| cell.is_none()).count())
+            .sum();
+        let reached_empties: usize = reached
+            .iter()
+            .map(|row| row.iter().filter(|&boo| *boo).count())
+            .sum();
         all_empties - reached_empties
     }
 
@@ -832,8 +856,7 @@ impl Pathfinder {
     fn loss_debug(board: &Board, piece: &Piece) {
         let top = Pathfinder::top_line(board);
         let lines = Board::HEIGHT - top;
-        let board_holes =
-            Pathfinder::count_board_holes(board) * Pathfinder::BOARD_HOLE_PENALTY;
+        let board_holes = Pathfinder::count_board_holes(board) * Pathfinder::BOARD_HOLE_PENALTY;
         let initiated_lines =
             Pathfinder::count_initiated_lines(piece, top) * Pathfinder::INITIATED_LINE_PENALTY;
         let filled_holes =
@@ -1130,7 +1153,7 @@ impl ggez::event::EventHandler for Game {
                     h,
                 },
                 self.palette.bg,
-            );
+            )?;
 
             // draw board border
             mesh = mesh.rectangle(
@@ -1142,7 +1165,7 @@ impl ggez::event::EventHandler for Game {
                     h: tile_size * Board::HEIGHT as f32,
                 },
                 graphics::BLACK,
-            );
+            )?;
 
             // draw board background
             mesh = mesh.rectangle(
@@ -1154,11 +1177,11 @@ impl ggez::event::EventHandler for Game {
                     h: tile_size * Board::HEIGHT as f32,
                 },
                 self.palette.board,
-            );
+            )?;
 
             // draw fields
             for (pos, field) in self.board.fields() {
-                mesh = field.mesh(mesh, pos, tile_size, screen_offset);
+                mesh = field.mesh(mesh, pos, tile_size, screen_offset)?;
             }
 
             self.board_mesh = CachedMesh {
@@ -1174,10 +1197,10 @@ impl ggez::event::EventHandler for Game {
                     .current
                     .fields()
                     .into_iter()
-                    .fold(
+                    .try_fold(
                         &mut ggez::graphics::MeshBuilder::new(),
                         |mb, (pos, field)| field.mesh(mb, pos, tile_size, screen_offset),
-                    )
+                    )?
                     .build(ctx)?,
             };
         }
@@ -1189,10 +1212,10 @@ impl ggez::event::EventHandler for Game {
                     .ghost
                     .fields()
                     .into_iter()
-                    .fold(
+                    .try_fold(
                         &mut ggez::graphics::MeshBuilder::new(),
                         |mb, (pos, field)| field.mesh(mb, pos, tile_size, screen_offset),
-                    )
+                    )?
                     .build(ctx)?,
             };
         }
@@ -1206,12 +1229,12 @@ impl ggez::event::EventHandler for Game {
                 h: tile_size * 5f32,
             };
             mesh = mesh
-                .rectangle(graphics::DrawMode::fill(), next_rect, self.palette.board)
+                .rectangle(graphics::DrawMode::fill(), next_rect, self.palette.board)?
                 .rectangle(
                     graphics::DrawMode::stroke(tile_size / 10.0),
                     next_rect,
                     self.palette.board.darken(),
-                )
+                )?
                 .clone();
             self.next_mesh = CachedMesh {
                 valid: true,
@@ -1219,7 +1242,7 @@ impl ggez::event::EventHandler for Game {
                     .next
                     .fields()
                     .into_iter()
-                    .fold(&mut mesh, |mb, (pos, field)| {
+                    .try_fold(&mut mesh, |mb, (pos, field)| {
                         field.mesh(
                             mb,
                             pos + Offset {
@@ -1229,7 +1252,7 @@ impl ggez::event::EventHandler for Game {
                             tile_size,
                             screen_offset,
                         )
-                    })
+                    })?
                     .build(ctx)?,
             };
         }
@@ -1244,15 +1267,15 @@ impl ggez::event::EventHandler for Game {
                             |mb, y| {
                                 mb.line(
                                     &[
-                                        na::Point2::new(
-                                            screen_offset.x as f32,
-                                            screen_offset.y as f32 + tile_size * y as f32,
-                                        ),
-                                        na::Point2::new(
-                                            screen_offset.x as f32
+                                        mint::Point2 {
+                                            x: screen_offset.x as f32,
+                                            y: screen_offset.y as f32 + tile_size * y as f32,
+                                        },
+                                        mint::Point2 {
+                                            x: screen_offset.x as f32
                                                 + tile_size * Board::WIDTH as f32,
-                                            screen_offset.y as f32 + tile_size * y as f32,
-                                        ),
+                                            y: screen_offset.y as f32 + tile_size * y as f32,
+                                        },
                                     ],
                                     tile_size / 10f32,
                                     self.palette.grid,
@@ -1263,14 +1286,15 @@ impl ggez::event::EventHandler for Game {
                         |mb, x| {
                             mb.line(
                                 &[
-                                    na::Point2::new(
-                                        screen_offset.x as f32 + tile_size * x as f32,
-                                        screen_offset.y as f32,
-                                    ),
-                                    na::Point2::new(
-                                        screen_offset.x as f32 + tile_size * x as f32,
-                                        screen_offset.y as f32 + tile_size * Board::HEIGHT as f32,
-                                    ),
+                                    mint::Point2 {
+                                        x: screen_offset.x as f32 + tile_size * x as f32,
+                                        y: screen_offset.y as f32,
+                                    },
+                                    mint::Point2 {
+                                        x: screen_offset.x as f32 + tile_size * x as f32,
+                                        y: screen_offset.y as f32
+                                            + tile_size * Board::HEIGHT as f32,
+                                    },
                                 ],
                                 tile_size / 10f32,
                                 self.palette.grid,
