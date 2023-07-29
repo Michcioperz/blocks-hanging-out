@@ -674,7 +674,7 @@ impl CachedMesh {
                 ctx,
                 &[[0.0, 0.0], [1.0, 1.0]],
                 1.0,
-                ggez::graphics::WHITE,
+                ggez::graphics::Color::WHITE,
             )?,
         })
     }
@@ -1102,7 +1102,7 @@ impl Game {
     }
 
     fn screen_utils(&self, ctx: &Context) -> ScreenUtils {
-        let (w, h) = ggez::graphics::size(ctx);
+        let (w, h) = ctx.gfx.drawable_size();
         let tile_size = (w / (1 + Board::WIDTH + 7) as f32).min(h / (1 + Board::HEIGHT + 1) as f32);
         let screen_offset = if (7 + Board::WIDTH + 7) as f32 * tile_size <= w {
             Offset {
@@ -1164,7 +1164,7 @@ impl ggez::event::EventHandler for Game {
                     w: tile_size * Board::WIDTH as f32,
                     h: tile_size * Board::HEIGHT as f32,
                 },
-                graphics::BLACK,
+                graphics::Color::BLACK,
             )?;
 
             // draw board background
@@ -1186,37 +1186,41 @@ impl ggez::event::EventHandler for Game {
 
             self.board_mesh = CachedMesh {
                 valid: true,
-                mesh: mesh.build(ctx)?,
+                mesh: graphics::Mesh::from_data(&ctx.gfx, mesh.build()),
             };
         }
 
         if !self.current_mesh.valid {
             self.current_mesh = CachedMesh {
                 valid: true,
-                mesh: self
-                    .current
-                    .fields()
-                    .into_iter()
-                    .try_fold(
-                        &mut ggez::graphics::MeshBuilder::new(),
-                        |mb, (pos, field)| field.mesh(mb, pos, tile_size, screen_offset),
-                    )?
-                    .build(ctx)?,
+                mesh: graphics::Mesh::from_data(
+                    &ctx.gfx,
+                    self.current
+                        .fields()
+                        .into_iter()
+                        .try_fold(
+                            &mut ggez::graphics::MeshBuilder::new(),
+                            |mb, (pos, field)| field.mesh(mb, pos, tile_size, screen_offset),
+                        )?
+                        .build(),
+                ),
             };
         }
 
         if !self.ghost_mesh.valid {
             self.ghost_mesh = CachedMesh {
                 valid: true,
-                mesh: self
-                    .ghost
-                    .fields()
-                    .into_iter()
-                    .try_fold(
-                        &mut ggez::graphics::MeshBuilder::new(),
-                        |mb, (pos, field)| field.mesh(mb, pos, tile_size, screen_offset),
-                    )?
-                    .build(ctx)?,
+                mesh: graphics::Mesh::from_data(
+                    &ctx.gfx,
+                    self.ghost
+                        .fields()
+                        .into_iter()
+                        .try_fold(
+                            &mut ggez::graphics::MeshBuilder::new(),
+                            |mb, (pos, field)| field.mesh(mb, pos, tile_size, screen_offset),
+                        )?
+                        .build(),
+                ),
             };
         }
 
@@ -1238,43 +1242,66 @@ impl ggez::event::EventHandler for Game {
                 .clone();
             self.next_mesh = CachedMesh {
                 valid: true,
-                mesh: self
-                    .next
-                    .fields()
-                    .into_iter()
-                    .try_fold(&mut mesh, |mb, (pos, field)| {
-                        field.mesh(
-                            mb,
-                            pos + Offset {
-                                x: (Board::WIDTH as isize - self.next.center.x + 3) as isize,
-                                y: 0,
-                            },
-                            tile_size,
-                            screen_offset,
-                        )
-                    })?
-                    .build(ctx)?,
+                mesh: graphics::Mesh::from_data(
+                    &ctx.gfx,
+                    self.next
+                        .fields()
+                        .into_iter()
+                        .try_fold(&mut mesh, |mb, (pos, field)| {
+                            field.mesh(
+                                mb,
+                                pos + Offset {
+                                    x: (Board::WIDTH as isize - self.next.center.x + 3) as isize,
+                                    y: 0,
+                                },
+                                tile_size,
+                                screen_offset,
+                            )
+                        })?
+                        .build(),
+                ),
             };
         }
 
         if self.show_grid && !self.grid_mesh.valid {
             self.grid_mesh = CachedMesh {
                 valid: true,
-                mesh: (1..Board::WIDTH)
-                    .fold(
-                        (1..Board::HEIGHT).fold(
-                            &mut ggez::graphics::MeshBuilder::new(),
-                            |mb, y| {
+                mesh: graphics::Mesh::from_data(
+                    &ctx.gfx,
+                    (1..Board::WIDTH)
+                        .fold(
+                            (1..Board::HEIGHT).fold(
+                                &mut ggez::graphics::MeshBuilder::new(),
+                                |mb, y| {
+                                    mb.line(
+                                        &[
+                                            mint::Point2 {
+                                                x: screen_offset.x as f32,
+                                                y: screen_offset.y as f32 + tile_size * y as f32,
+                                            },
+                                            mint::Point2 {
+                                                x: screen_offset.x as f32
+                                                    + tile_size * Board::WIDTH as f32,
+                                                y: screen_offset.y as f32 + tile_size * y as f32,
+                                            },
+                                        ],
+                                        tile_size / 10f32,
+                                        self.palette.grid,
+                                    )
+                                    .unwrap()
+                                },
+                            ),
+                            |mb, x| {
                                 mb.line(
                                     &[
                                         mint::Point2 {
-                                            x: screen_offset.x as f32,
-                                            y: screen_offset.y as f32 + tile_size * y as f32,
+                                            x: screen_offset.x as f32 + tile_size * x as f32,
+                                            y: screen_offset.y as f32,
                                         },
                                         mint::Point2 {
-                                            x: screen_offset.x as f32
-                                                + tile_size * Board::WIDTH as f32,
-                                            y: screen_offset.y as f32 + tile_size * y as f32,
+                                            x: screen_offset.x as f32 + tile_size * x as f32,
+                                            y: screen_offset.y as f32
+                                                + tile_size * Board::HEIGHT as f32,
                                         },
                                     ],
                                     tile_size / 10f32,
@@ -1282,66 +1309,45 @@ impl ggez::event::EventHandler for Game {
                                 )
                                 .unwrap()
                             },
-                        ),
-                        |mb, x| {
-                            mb.line(
-                                &[
-                                    mint::Point2 {
-                                        x: screen_offset.x as f32 + tile_size * x as f32,
-                                        y: screen_offset.y as f32,
-                                    },
-                                    mint::Point2 {
-                                        x: screen_offset.x as f32 + tile_size * x as f32,
-                                        y: screen_offset.y as f32
-                                            + tile_size * Board::HEIGHT as f32,
-                                    },
-                                ],
-                                tile_size / 10f32,
-                                self.palette.grid,
-                            )
-                            .unwrap()
-                        },
-                    )
-                    .build(ctx)?,
+                        )
+                        .build(),
+                ),
             };
         }
 
         if needs_redraw {
-            graphics::clear(ctx, self.palette.bg);
-            (*self.board_mesh).draw(ctx, graphics::DrawParam::default())?;
-            (*self.current_mesh).draw(ctx, graphics::DrawParam::default())?;
-            (*self.ghost_mesh).draw(ctx, graphics::DrawParam::default())?;
-            (*self.next_mesh).draw(ctx, graphics::DrawParam::default())?;
+            let mut canvas = graphics::Canvas::from_frame(ctx, self.palette.bg);
+            canvas.set_screen_coordinates(ggez::graphics::Rect {
+                x: 0f32,
+                y: 0f32,
+                w,
+                h,
+            });
+            (*self.board_mesh).draw(&mut canvas, graphics::DrawParam::default());
+            (*self.current_mesh).draw(&mut canvas, graphics::DrawParam::default());
+            (*self.ghost_mesh).draw(&mut canvas, graphics::DrawParam::default());
+            (*self.next_mesh).draw(&mut canvas, graphics::DrawParam::default());
             if self.show_grid {
-                (*self.grid_mesh).draw(ctx, graphics::DrawParam::default())?;
+                (*self.grid_mesh).draw(&mut canvas, graphics::DrawParam::default());
             }
-            graphics::present(ctx)?;
+            canvas.finish(ctx)?;
         }
         ggez::timer::yield_now();
         Ok(())
     }
 
-    fn resize_event(&mut self, ctx: &mut Context, width: f32, height: f32) {
+    fn resize_event(&mut self, ctx: &mut Context, width: f32, height: f32) -> GameResult<()> {
         self.board_mesh.valid = false;
         self.current_mesh.valid = false;
         self.ghost_mesh.valid = false;
         self.next_mesh.valid = false;
         self.grid_mesh.valid = false;
-        ggez::graphics::set_screen_coordinates(
-            ctx,
-            ggez::graphics::Rect {
-                x: 0f32,
-                y: 0f32,
-                w: width,
-                h: height,
-            },
-        )
-        .unwrap();
+        Ok(())
     }
 
-    fn mouse_wheel_event(&mut self, _ctx: &mut Context, _x: f32, y: f32) {
+    fn mouse_wheel_event(&mut self, _ctx: &mut Context, _x: f32, y: f32) -> GameResult<()> {
         if self.auto_mode || !self.mouse_enabled {
-            return;
+            return Ok(());
         }
         let y = -y;
         if y >= 1f32 {
@@ -1350,21 +1356,21 @@ impl ggez::event::EventHandler for Game {
         if y <= 1f32 {
             self.target_rotate(-Rotation::from(-y.trunc() as usize));
         }
+        Ok(())
     }
 
     fn key_down_event(
         &mut self,
         _ctx: &mut Context,
-        keycode: ggez::input::keyboard::KeyCode,
-        keymods: ggez::input::keyboard::KeyMods,
+        input: ggez::input::keyboard::KeyInput,
         _repeat: bool,
-    ) {
+    ) -> GameResult<()> {
         use ggez::input::keyboard::KeyCode;
         if self.auto_mode {
-            return;
+            return Ok(());
         }
-        if keymods.is_empty() {
-            match keycode {
+        if input.mods.is_empty() {
+            match input.keycode.unwrap() {
                 KeyCode::Up | KeyCode::W => self.target_move(Offset { x: 0, y: -1 }),
                 KeyCode::Down | KeyCode::S => self.target_move(Offset { x: 0, y: 1 }),
                 KeyCode::Left | KeyCode::A => self.target_move(Offset { x: -1, y: 0 }),
@@ -1376,17 +1382,17 @@ impl ggez::event::EventHandler for Game {
                 _ => (),
             }
         }
+        Ok(())
     }
 
     fn key_up_event(
         &mut self,
         ctx: &mut Context,
-        keycode: ggez::input::keyboard::KeyCode,
-        keymods: ggez::input::keyboard::KeyMods,
-    ) {
+        input: ggez::input::keyboard::KeyInput,
+    ) -> GameResult<()> {
         use ggez::input::keyboard::KeyCode;
-        if keymods.is_empty() {
-            match keycode {
+        if input.mods.is_empty() {
+            match input.keycode.unwrap() {
                 KeyCode::G => {
                     self.show_grid = !self.show_grid;
                 }
@@ -1400,15 +1406,23 @@ impl ggez::event::EventHandler for Game {
                     }
                 }
                 KeyCode::Space | KeyCode::Return if !self.auto_mode => self.try_place(ctx),
-                KeyCode::Escape => ggez::event::quit(ctx),
+                KeyCode::Escape => ctx.request_quit(),
                 _ => {}
             }
         }
+        Ok(())
     }
 
-    fn mouse_motion_event(&mut self, ctx: &mut Context, x: f32, y: f32, _dx: f32, _dy: f32) {
+    fn mouse_motion_event(
+        &mut self,
+        ctx: &mut Context,
+        x: f32,
+        y: f32,
+        _dx: f32,
+        _dy: f32,
+    ) -> GameResult<()> {
         if self.auto_mode || !self.mouse_enabled {
-            return;
+            return Ok(());
         }
         let ScreenUtils {
             w: _,
@@ -1423,6 +1437,7 @@ impl ggez::event::EventHandler for Game {
             .max(0)
             .min(Board::HEIGHT as isize - 1);
         self.target_move_to(Position { x, y });
+        Ok(())
     }
 
     fn mouse_button_up_event(
@@ -1431,9 +1446,9 @@ impl ggez::event::EventHandler for Game {
         button: ggez::input::mouse::MouseButton,
         _x: f32,
         _y: f32,
-    ) {
+    ) -> GameResult<()> {
         if self.auto_mode || !self.mouse_enabled {
-            return;
+            return Ok(());
         }
         match button {
             ggez::input::mouse::MouseButton::Left => {
@@ -1445,6 +1460,7 @@ impl ggez::event::EventHandler for Game {
             }
             _ => {}
         }
+        Ok(())
     }
 
     fn update(&mut self, ctx: &mut Context) -> GameResult<()> {
